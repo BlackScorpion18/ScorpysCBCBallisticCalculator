@@ -5,4 +5,5 @@ set(CMAKE_C_STANDARD 17)
 
 add_executable(ScorpysCBCBallisticCalculator main.c
         calculations.c
-        calculations.h)
+        calculations.h
+        structs.h)
