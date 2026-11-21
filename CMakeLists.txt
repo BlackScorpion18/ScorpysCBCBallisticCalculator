@@ -3,4 +3,6 @@ project(ScorpysCBCBallisticCalculator C)
 
 set(CMAKE_C_STANDARD 17)
 
-add_executable(ScorpysCBCBallisticCalculator main.c)
+add_executable(ScorpysCBCBallisticCalculator main.c
+        calculations.c
+        calculations.h)
