@@ -2,164 +2,8 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-
-#ifndef PI
-#define PI 3.14159265358979323846
-#endif
-
-typedef struct {
-    double x;
-    double y;
-    double z;
-} coord;
-
-typedef struct {
-    double low;
-    double high;
-} PitchDouble;
-
-typedef struct {
-    double pitchLow;
-    double pitchHigh;
-    double yaw;
-    double initialVelocity;
-    double length;
-    coord cannonCoords;
-    coord targetCoords;
-} FiringSolution;
-
-// height of the shell above the target once it has covered the horizontal distance to it,
-// fired at angle theta from the tip of a barrel of the given length pivoting on the mount
-static double heightError(double theta, double dR, double dy, double v0, double length) {
-    const double TERMINAL_V = 4.95;                  // (0.99 * 0.05) / (1.0 - 0.99)
-    const double LN_DRAG = -0.01005033585350144;     // ln(0.99)
-    double c = cos(theta);
-    double r = dR - length * c;          // horizontal distance from barrel tip to target
-    double h = dy - length * sin(theta); // target height above barrel tip
-    return r * tan(theta) + (TERMINAL_V * r) / (v0 * c)
-         - TERMINAL_V * (log(1.0 - r / (100.0 * v0 * c)) / LN_DRAG) - h;
-}
-
-double computeYaw(const coord* cannonCoords, const coord* targetCoords) {
-    double deltaX = targetCoords->x - cannonCoords->x;
-    double deltaZ = targetCoords->z - cannonCoords->z;
-    // in degrees: 0 = south, 90 = west, 180 = north, 270 = east
-    double theta = atan2(-deltaX, deltaZ) * (180.0/PI);
-    return fmod(theta + 360.0, 360.0);
-}
-
-PitchDouble* computePitch(const coord* cannonCoords, const coord* targetCoords,
-    const double initialVelocity, const double length) {
-    PitchDouble* result = malloc(sizeof(PitchDouble));
-    if (result == NULL) {
-        return NULL;
-    }
-    result->low = NAN;
-    result->high = NAN;
-
-    const double v0 = initialVelocity / 20.0;        // convert blocks/s to blocks/tick
-
-    double dx = targetCoords->x - cannonCoords->x;
-    double dy = targetCoords->y - cannonCoords->y;
-    double dz = targetCoords->z - cannonCoords->z;
-    double dR = sqrt(dx * dx + dz * dz);
-
-    // check if target is beyond maximum possible horizontal range
-    double ratio = dR / (100.0 * v0 + length);
-    if (ratio >= 1.0) {
-        return result;
-    }
-
-    double min_theta = -M_PI / 2.0 + 1e-4;
-    double max_theta = acos(ratio) - 1e-6;
-
-    // find peak elevation angle that maximizes height at distance dR
-    const double inv_phi = 0.6180339887498949;
-    double a = min_theta, b = max_theta;
-    double c = b - (b - a) * inv_phi;
-    double d = a + (b - a) * inv_phi;
-
-    while (fabs(b - a) > 1e-6) {
-        double y_c = heightError(c, dR, dy, v0, length);
-        double y_d = heightError(d, dR, dy, v0, length);
-        if (y_c > y_d) {
-            b = d;
-        } else {
-            a = c;
-        }
-        c = b - (b - a) * inv_phi;
-        d = a + (b - a) * inv_phi;
-    }
-    double peak_theta = 0.5 * (a + b);
-
-    // check if the highest possible shot still falls below the target
-    if (heightError(peak_theta, dR, dy, v0, length) < 0.0) {
-        return result;
-    }
-
-    // bisection search on [min_theta, peak_theta] for low arc
-    double low = min_theta, high = peak_theta;
-    for (int i = 0; i < 60; i++) {
-        double mid = 0.5 * (low + high);
-        double err = heightError(mid, dR, dy, v0, length);
-
-        if (fabs(err) < 1e-6 || (high - low) < 1e-8) {
-            low = high = mid;
-            break;
-        }
-        if (err < 0.0) {
-            low = mid;
-        } else {
-            high = mid;
-        }
-    }
-    result->low = 0.5 * (low + high) * (180.0 / M_PI);
-
-    // bisection search on [peak_theta, max_theta] for high arc
-    low = peak_theta;
-    high = max_theta;
-    for (int i = 0; i < 60; i++) {
-        double mid = 0.5 * (low + high);
-        double err = heightError(mid, dR, dy, v0, length);
-
-        if (fabs(err) < 1e-6 || (high - low) < 1e-8) {
-            low = high = mid;
-            break;
-        }
-
-        if (err > 0.0) {
-            low = mid;
-        } else {
-            high = mid;
-        }
-    }
-    result->high = 0.5 * (low + high) * (180.0 / M_PI);
-
-    return result;
-}
-
-FiringSolution* computeFiringSolution(const coord* cannonCoords, const coord* targetCoords,
-    const double initialVelocity, double length) {
-    FiringSolution* result = malloc(sizeof(FiringSolution));
-    if (result == NULL) {
-        return NULL;
-    }
-    result->cannonCoords = *cannonCoords;
-    result->targetCoords = *targetCoords;
-    result->initialVelocity = initialVelocity;
-    result->length = length;
-    result->yaw = computeYaw(cannonCoords, targetCoords);
-    PitchDouble* pitchDouble = computePitch(cannonCoords, targetCoords, initialVelocity, length);
-    if (pitchDouble == NULL) {
-        free(result);
-        return NULL;
-    }
-    result->pitchLow = pitchDouble->low;
-    result->pitchHigh = pitchDouble->high;
-    free(pitchDouble);
-
-    return result;
-}
+#include "calculations.h"
+#include "expimp.h"
 
 void printFiringSolution(const FiringSolution* firingSolution) {
     if (firingSolution == NULL) {
@@ -212,7 +56,15 @@ int main(int argc, char *argv[]) {
 
     FiringSolution* firingSolution = NULL;
 
-    char buff[128];
+    char buff[256];
+
+    printf("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                   "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                   "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                   "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                   "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+                   "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+
     printf("Welcome to Scorpy's CBC Ballistic Calculator!\n"
            "Type 'help' for help.\n");
 
@@ -253,6 +105,8 @@ int main(int argc, char *argv[]) {
                    "-> len: input cannon length (mount block to tip, both included)\n"
                    "-> run: compute firing solution (pitch and yaw)\n"
                    "-> disp: display last calculated firing solution\n"
+                   "-> exp: export firing solution to a .dat file\n"
+                   "-> imp: import firing solution from a .dat file\n"
                    "\n"
                    "Coordinates are Minecraft's (x,y,z) coordinates.\n"
                    "Values for the coordinates are initialized as (0,0,0) for the cannon, "
@@ -361,6 +215,62 @@ int main(int argc, char *argv[]) {
             } else {
                 printFiringSolution(firingSolution);
             }
+            continue;
+        }
+
+        if (strcmp(buff, "exp") == 0) {
+            printf("Specify a file name (enter nothing to use the default name - SCBCBCparam.dat):\n");
+            if (fgets(buff, sizeof(buff), stdin) == NULL) {
+                break;                  // EOF: input closed
+            }
+            buff[strcspn(buff, "\n")] = '\0';
+
+            int err;
+            if (buff[0] == '\0') {
+                err = exportParamsBin(cannonCoords, targetCoords, initialVelocity, cannonLength, "SCBCBCparam.dat");
+            } else err = exportParamsBin(cannonCoords, targetCoords, initialVelocity, cannonLength, buff);
+
+            switch (err) {
+                case 0:
+                    printf("File exported successfully!\n");
+                    break;
+                case -2:
+                    printf("ERROR! Specified file is not a .dat file.\n");
+                    break;
+                default:
+                    printf("ERROR! File exporting failed due to an unspecified error.\n");
+                    break;
+            }
+
+            continue;
+        }
+
+        if (strcmp(buff, "imp") == 0) {
+            printf("Specify a file name (enter nothing to use the default name - SCBCBCparam.dat):\n");
+            if (fgets(buff, sizeof(buff), stdin) == NULL) {
+                break;                  // EOF: input closed
+            }
+            buff[strcspn(buff, "\n")] = '\0';
+
+            SolutionParams* params;
+            if (buff[0] == '\0') {
+                params = importParamsBin("SCBCBCparam.dat");
+            } else params = importParamsBin(buff);
+
+            if (params == NULL) {
+                printf("ERROR! Failed to import the file. Verify the file's existence and extension and try again.\n");
+            } else {
+                cannonCoords->x = params->cannonX;
+                cannonCoords->y = params->cannonY;
+                cannonCoords->z = params->cannonZ;
+                targetCoords->x = params->targetX;
+                targetCoords->y = params->targetY;
+                targetCoords->z = params->targetZ;
+                initialVelocity = params->initialVelocity;
+                cannonLength = params->length;
+                printf("Parameters successfully imported from file!\n");
+            }
+
             continue;
         }
 
