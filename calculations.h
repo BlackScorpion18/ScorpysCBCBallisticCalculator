@@ -5,6 +5,7 @@
 #ifndef SCORPYSCBCBALLISTICCALCULATOR_CALCULATIONS_H
 #define SCORPYSCBCBALLISTICCALCULATOR_CALCULATIONS_H
 
+#include "structs.h"
 
 /**
  * computes the yaw needed for a firing solution.
@@ -12,7 +13,7 @@
  * @param targetCoords a pointer to a struct containing the coordinates of the target.
  * @return the yaw angle, in degrees.
  */
-double computeYaw(const coord* cannonCoords, const coord* targetCoords)
+double computeYaw(const coord* cannonCoords, const coord* targetCoords);
 
 /**
  * computes the height error, needed for the pitch calculations.

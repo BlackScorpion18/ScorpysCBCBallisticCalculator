@@ -30,4 +30,15 @@ typedef struct {
     coord targetCoords;
 } FiringSolution;
 
+typedef struct {
+    double cannonX;
+    double cannonY;
+    double cannonZ;
+    double targetX;
+    double targetY;
+    double targetZ;
+    double initialVelocity;
+    double length;
+} SolutionParams;
+
 #endif //SCORPYSCBCBALLISTICCALCULATOR_STRUCTS_H
